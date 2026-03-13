@@ -59,7 +59,17 @@ func isLogCall(call *ast.CallExpr) bool {
 	if !ok {
 		return false
 	}
-	return logMethods[sel.Sel.Name]
+
+	if !logMethods[sel.Sel.Name] {
+		return false
+	}
+
+	ident, ok := sel.X.(*ast.Ident)
+	if !ok {
+		return false
+	}
+
+	return logPackages[ident.Name]
 }
 
 func extractMessage(call *ast.CallExpr) (string, bool) {

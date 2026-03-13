@@ -1,0 +1,10 @@
+linters-settings:
+  custom:
+    loglint:
+      path: ./loglint.so
+      description: "checks log messages for style and security"
+      original-url: github.com/golchanskiy23/loglint
+ 
+linters:
+  enable:
+    - loglint
