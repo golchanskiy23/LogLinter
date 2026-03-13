@@ -38,7 +38,6 @@ func init() {
 		"path to configuration file")
 }
 
-// Config structure for future YAML support
 type Config struct {
 	DisableLowercase bool     `yaml:"disable-lowercase"`
 	DisableEnglish   bool     `yaml:"disable-english"`
@@ -191,8 +190,12 @@ func isEmoji(r rune) bool {
 func checkSpecialChars(pass *analysis.Pass, call *ast.CallExpr, msg string) {
 	for _, r := range msg {
 		if isEmoji(r) {
-			pass.Reportf(call.Pos(),
-				"log message must not contain emoji, found %q", string(r))
+			if lit, ok := call.Args[0].(*ast.BasicLit); ok {
+				pass.Report(emojiFix(pass, lit, msg, string(r)))
+			} else {
+				pass.Reportf(call.Pos(),
+					"log message must not contain emoji, found %q", string(r))
+			}
 			return
 		}
 		if forbiddenChars[r] {
@@ -200,6 +203,34 @@ func checkSpecialChars(pass *analysis.Pass, call *ast.CallExpr, msg string) {
 				"log message must not contain special character %q", string(r))
 			return
 		}
+	}
+}
+
+func removeEmoji(msg string) string {
+	var result []rune
+	for _, r := range msg {
+		if !isEmoji(r) {
+			result = append(result, r)
+		}
+	}
+	return string(result)
+}
+
+func emojiFix(pass *analysis.Pass, lit *ast.BasicLit, msg string, emoji string) analysis.Diagnostic {
+	fixed := removeEmoji(msg)
+	fixed = strconv.Quote(fixed)
+
+	return analysis.Diagnostic{
+		Pos:     lit.Pos(),
+		Message: fmt.Sprintf("log message must not contain emoji, found %q", emoji),
+		SuggestedFixes: []analysis.SuggestedFix{{
+			Message: "remove emoji from log message",
+			TextEdits: []analysis.TextEdit{{
+				Pos:     lit.Pos(),
+				End:     lit.End(),
+				NewText: []byte(fixed),
+			}},
+		}},
 	}
 }
 
@@ -279,7 +310,6 @@ func containsSensitiveKeyword(lower, keyword string) bool {
 func checkSensitive(pass *analysis.Pass, call *ast.CallExpr, msg string, extraKeywords []string) {
 	lower := strings.ToLower(msg)
 
-	// Check built-in keywords
 	for _, sk := range sensitiveKeywords {
 		if containsSensitiveKeyword(lower, sk) {
 			pass.Reportf(call.Pos(),
@@ -288,7 +318,6 @@ func checkSensitive(pass *analysis.Pass, call *ast.CallExpr, msg string, extraKe
 		}
 	}
 
-	// Check extra keywords
 	for _, sk := range extraKeywords {
 		if containsSensitiveKeyword(lower, strings.ToLower(sk)) {
 			pass.Reportf(call.Pos(),

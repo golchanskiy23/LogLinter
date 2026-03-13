@@ -34,6 +34,15 @@ slog.Info("user logged in.")       // ❌ should not contain special characters
 slog.Info("🔥 fire")                // ❌ should not contain emoji
 ```
 
+**Автоисправление для emoji:**
+```go
+// Before:
+log.Print("Error occurred while processing 🔥")
+
+// Auto-corrected to:
+log.Print("Error occurred while processing")
+```
+
 ### Sensitive data rule
 ```go
 slog.Info("user request processed") // ✅ OK
@@ -43,10 +52,7 @@ slog.Info("login: " + username)      // ❌ concatenates potentially sensitive v
 
 ## Поддерживаемые логгеры
 
-- `log.Info()`, `log.Error()`, `log.Warn()`, `log.Debug()`, `log.Fatal()`, `log.Panic()`
-- `log.Print()`, `log.Printf()`, `log.Println()`
-- `slog.Info()`, `slog.Error()`, `slog.Warn()`, `slog.Debug()`
-- `zap.Info()`, `zap.Error()`, `zap.Warn()`, `zap.Debug()`
+- `log`, `slog`, `zap`
 
 ## Встроенные "чувствительные" слова
 
@@ -55,6 +61,30 @@ slog.Info("login: " + username)      // ❌ concatenates potentially sensitive v
 - `credential`, `private_key`, `privatekey`
 
 *Расширяемо через конфигурацию.*
+
+## Конфигурация
+
+LogLinter поддерживает гибкую конфигурацию через **configuration file** флаги командной строки.
+
+### Конфигурационный файл**
+
+Создайте `.loglint.yml` в корне проекта:
+
+```yaml
+# LogLinter Configuration File
+
+# Disable specific rules
+disable-lowercase: false
+disable-english: false
+disable-special: false
+disable-sensitive: false
+
+# Add custom sensitive keywords
+extra-sensitive:
+  - "custom_secret"
+  - "private_data"
+  - "user_token"
+```
 
 ## Установка
 
@@ -105,30 +135,6 @@ go build -o loglint ./cmd/loglint
 ./loglint ../your_project/...
 ```
 
-## Конфигурация
-
-LogLinter поддерживает гибкую конфигурацию через **configuration file** флаги командной строки.
-
-### Конфигурационный файл**
-
-Создайте `.loglint.yml` в корне проекта:
-
-```yaml
-# LogLinter Configuration File
-
-# Disable specific rules
-disable-lowercase: false
-disable-english: false
-disable-special: false
-disable-sensitive: false
-
-# Add custom sensitive keywords
-extra-sensitive:
-  - "custom_secret"
-  - "private_data"
-  - "user_token"
-```
-
 ### Флаги командной строки (только через бинарник)
 
 ```bash
@@ -156,3 +162,4 @@ log.Print("error occurred while processing")
 
 **Поддержка правил:**
 - Автокоррекция Lowercase rule
+- Автоудаление emoji из логов
