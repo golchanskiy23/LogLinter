@@ -70,9 +70,37 @@ func extractMessage(call *ast.CallExpr) (string, bool) {
 	return msg, true
 }
 
+var forbiddenChars = map[rune]bool{
+	'!': true, '?': true, ';': true,
+}
+
+func isEmoji(r rune) bool {
+	return (r >= 0x1F300 && r <= 0x1FAFF) || // Misc Symbols, Emoticons, etc.
+		(r >= 0x2600 && r <= 0x27BF) // Misc Symbols block
+}
+
+func checkSpecialChars(pass *analysis.Pass, call *ast.CallExpr, msg string) {
+	for _, r := range msg {
+		if isEmoji(r) {
+			pass.Reportf(call.Pos(),
+				"log message must not contain emoji, found %q", string(r))
+			return
+		}
+		if forbiddenChars[r] {
+			pass.Reportf(call.Pos(),
+				"log message must not contain special character %q", string(r))
+			return
+		}
+	}
+}
+
+func isAllowedRune(r rune) bool {
+	return r <= 127
+}
+
 func checkEnglish(pass *analysis.Pass, call *ast.CallExpr, msg string) {
 	for _, r := range msg {
-		if unicode.IsLetter(r) && !unicode.Is(unicode.Latin, r) {
+		if unicode.IsLetter(r) && !isAllowedRune(r) {
 			pass.Reportf(call.Pos(),
 				"log message must be in English, found non-Latin character %q", string(r))
 			return
@@ -92,6 +120,12 @@ func checkLowercase(pass *analysis.Pass, call *ast.CallExpr, msg string) {
 }
 
 func checkMessage(pass *analysis.Pass, call *ast.CallExpr, msg string) {
+	// Правило 1: Строчная буква в начале
 	checkLowercase(pass, call, msg)
+
+	// Правило 2: Только английский язык
 	checkEnglish(pass, call, msg)
+
+	// Правило 3: Без спецсимволов и эмодзи
+	checkSpecialChars(pass, call, msg)
 }
