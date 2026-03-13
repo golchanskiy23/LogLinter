@@ -4,6 +4,7 @@ import (
 	"go/ast"
 	"go/token"
 	"strconv"
+	"strings"
 	"unicode"
 
 	"golang.org/x/tools/go/analysis"
@@ -58,6 +59,7 @@ func extractMessage(call *ast.CallExpr) (string, bool) {
 	if len(call.Args) == 0 {
 		return "", false
 	}
+
 	lit, ok := call.Args[0].(*ast.BasicLit)
 	if !ok || lit.Kind != token.STRING {
 		return "", false
@@ -71,12 +73,12 @@ func extractMessage(call *ast.CallExpr) (string, bool) {
 }
 
 var forbiddenChars = map[rune]bool{
-	'!': true, '?': true, ';': true,
+	'!': true, '?': true, ';': true, '.': true, '-': true,
 }
 
 func isEmoji(r rune) bool {
-	return (r >= 0x1F300 && r <= 0x1FAFF) || // Misc Symbols, Emoticons, etc.
-		(r >= 0x2600 && r <= 0x27BF) // Misc Symbols block
+	return (r >= 0x1F300 && r <= 0x1FAFF) ||
+		(r >= 0x2600 && r <= 0x27BF)
 }
 
 func checkSpecialChars(pass *analysis.Pass, call *ast.CallExpr, msg string) {
@@ -113,19 +115,63 @@ func checkLowercase(pass *analysis.Pass, call *ast.CallExpr, msg string) {
 	if len(runes) == 0 {
 		return
 	}
+
 	if unicode.IsUpper(runes[0]) {
 		pass.Reportf(call.Pos(),
 			"log message must start with lowercase letter, got %q", msg)
 	}
 }
 
+var sensitiveKeywords = []string{
+	"password", "passwd", "secret", "token",
+	"api_key", "apikey", "apitoken", "auth",
+	"credential", "private_key", "privatekey",
+}
+
+func checkSensitive(pass *analysis.Pass, call *ast.CallExpr, msg string) {
+	lower := strings.ToLower(msg)
+	for _, sk := range sensitiveKeywords {
+		if strings.Contains(lower, sk) {
+			pass.Reportf(call.Pos(),
+				"log message may contain sensitive data (keyword %q found)", sk)
+			return
+		}
+	}
+
+	if hasSensitiveConcatenation(call) {
+		pass.Reportf(call.Pos(),
+			"log message concatenates potentially sensitive variable")
+	}
+}
+
+func hasSensitiveConcatenation(call *ast.CallExpr) bool {
+	if len(call.Args) == 0 {
+		return false
+	}
+
+	return containsSensitiveVar(call.Args[0])
+}
+
+func containsSensitiveVar(expr ast.Expr) bool {
+	switch e := expr.(type) {
+	case *ast.BinaryExpr:
+		if e.Op == token.ADD {
+			return containsSensitiveVar(e.X) || containsSensitiveVar(e.Y)
+		}
+	case *ast.Ident:
+		name := strings.ToLower(e.Name)
+		for _, sk := range sensitiveKeywords {
+			if strings.Contains(name, sk) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 func checkMessage(pass *analysis.Pass, call *ast.CallExpr, msg string) {
-	// Правило 1: Строчная буква в начале
 	checkLowercase(pass, call, msg)
-
-	// Правило 2: Только английский язык
 	checkEnglish(pass, call, msg)
-
-	// Правило 3: Без спецсимволов и эмодзи
 	checkSpecialChars(pass, call, msg)
+	checkSensitive(pass, call, msg)
 }

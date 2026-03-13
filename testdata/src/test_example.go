@@ -8,7 +8,7 @@ import (
 
 func main() {
 	// Примеры логов для тестирования
-	slog.Info("user login successful")     // OK
+	slog.Info("user login successful.")    // OK
 	slog.Info("user login failed")         // OK
 	slog.Error("database connection lost") // OK
 
@@ -17,7 +17,7 @@ func main() {
 	slog.Info("user login successful 🎉")      // ERROR
 	slog.Info("User login Successful")        // ERROR
 	slog.Info("Пользователь вошел в систему") // ERROR
-	slog.Info("Password: secret123")          // ERROR
+	slog.Info("password: secret123")          // ERROR
 
 	// Zap примеры
 	logger := zap.NewExample()
