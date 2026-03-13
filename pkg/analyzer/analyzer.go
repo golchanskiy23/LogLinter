@@ -70,6 +70,16 @@ func extractMessage(call *ast.CallExpr) (string, bool) {
 	return msg, true
 }
 
+func checkEnglish(pass *analysis.Pass, call *ast.CallExpr, msg string) {
+	for _, r := range msg {
+		if unicode.IsLetter(r) && !unicode.Is(unicode.Latin, r) {
+			pass.Reportf(call.Pos(),
+				"log message must be in English, found non-Latin character %q", string(r))
+			return
+		}
+	}
+}
+
 func checkLowercase(pass *analysis.Pass, call *ast.CallExpr, msg string) {
 	runes := []rune(msg)
 	if len(runes) == 0 {
@@ -83,4 +93,5 @@ func checkLowercase(pass *analysis.Pass, call *ast.CallExpr, msg string) {
 
 func checkMessage(pass *analysis.Pass, call *ast.CallExpr, msg string) {
 	checkLowercase(pass, call, msg)
+	checkEnglish(pass, call, msg)
 }
