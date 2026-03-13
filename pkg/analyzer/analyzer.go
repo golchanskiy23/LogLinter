@@ -3,6 +3,8 @@ package analyzer
 import (
 	"fmt"
 	"go/ast"
+	"go/token"
+	"strconv"
 
 	"golang.org/x/tools/go/analysis"
 	"golang.org/x/tools/go/analysis/passes/inspect"
@@ -36,14 +38,39 @@ func run(pass *analysis.Pass) (interface{}, error) {
 	return nil, nil
 }
 
+// Известные логгеры и их методы
+var logMethods = map[string]bool{
+	"Info": true, "Error": true, "Warn": true, "Warning": true,
+	"Debug": true, "Fatal": true, "Panic": true,
+}
+
+// Пакеты-логгеры (для slog, zap sugar, стандартный log)
+var logPackages = map[string]bool{
+	"log": true, "slog": true, "zap": true,
+}
+
 func isLogCall(call *ast.CallExpr) bool {
-	// TODO: Реализовать проверку для log/slog и go.uber.org/zap
-	return false
+	sel, ok := call.Fun.(*ast.SelectorExpr)
+	if !ok {
+		return false
+	}
+	return logMethods[sel.Sel.Name]
 }
 
 func extractMessage(call *ast.CallExpr) (string, bool) {
-	// TODO: Реализовать извлечение сообщения из аргументов вызова
-	return "", false
+	if len(call.Args) == 0 {
+		return "", false
+	}
+	lit, ok := call.Args[0].(*ast.BasicLit)
+	if !ok || lit.Kind != token.STRING {
+		return "", false
+	}
+	// убрать кавычки: "hello" → hello
+	msg, err := strconv.Unquote(lit.Value)
+	if err != nil {
+		return "", false
+	}
+	return msg, true
 }
 
 func checkMessage(pass *analysis.Pass, call *ast.CallExpr, msg string) {
