@@ -29,6 +29,13 @@ func run(pass *analysis.Pass) (interface{}, error) {
 		if !isLogCall(call) {
 			return
 		}
+
+		if hasSensitiveConcatenation(call) {
+			pass.Reportf(call.Pos(),
+				"log message concatenates potentially sensitive variable")
+			return
+		}
+
 		msg, ok := extractMessage(call)
 		if !ok {
 			return
@@ -128,10 +135,28 @@ var sensitiveKeywords = []string{
 	"credential", "private_key", "privatekey",
 }
 
+func containsSensitiveKeyword(lower, keyword string) bool {
+	idx := strings.Index(lower, keyword)
+	if idx == -1 {
+		return false
+	}
+
+	if idx > 0 && (unicode.IsLetter(rune(lower[idx-1])) || lower[idx-1] == '_') {
+		return false
+	}
+
+	end := idx + len(keyword)
+	if end < len(lower) && (unicode.IsLetter(rune(lower[end])) || lower[end] == '_') {
+		return false
+	}
+
+	return true
+}
+
 func checkSensitive(pass *analysis.Pass, call *ast.CallExpr, msg string) {
 	lower := strings.ToLower(msg)
 	for _, sk := range sensitiveKeywords {
-		if strings.Contains(lower, sk) {
+		if containsSensitiveKeyword(lower, sk) { // ← было strings.Contains
 			pass.Reportf(call.Pos(),
 				"log message may contain sensitive data (keyword %q found)", sk)
 			return
