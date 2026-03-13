@@ -8,16 +8,16 @@ import (
 
 func main() {
 	// Примеры логов для тестирования
-	slog.Info("User login successful")     // OK
-	slog.Info("User login failed")         // OK
-	slog.Error("Database connection lost") // OK
+	slog.Info("user login successful.")    // OK
+	slog.Info("user login failed")         // OK
+	slog.Error("database connection lost") // OK
 
 	// Плохие примеры (должны быть найдены линтером)
-	slog.Info("User login successful!")       // ERROR
-	slog.Info("User login successful 🎉")      // ERROR
+	slog.Info("User login successfuцццй!")    // ERROR
+	slog.Info("user login successful 🎉")      // ERROR
 	slog.Info("User login Successful")        // ERROR
 	slog.Info("Пользователь вошел в систему") // ERROR
-	slog.Info("Password: secret123")          // ERROR
+	slog.Info("password: secret123")          // ERROR
 
 	// Zap примеры
 	logger := zap.NewExample()
