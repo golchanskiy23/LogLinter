@@ -1,8 +1,10 @@
 package analyzer
 
 import (
+	"fmt"
 	"go/ast"
 	"go/token"
+	"os"
 	"strconv"
 	"strings"
 	"unicode"
@@ -12,6 +14,82 @@ import (
 	"golang.org/x/tools/go/ast/inspector"
 )
 
+var (
+	flagDisableLowercase bool
+	flagDisableEnglish   bool
+	flagDisableSpecial   bool
+	flagDisableSensitive bool
+	flagExtraKeywords    string
+	flagConfigFile       string
+)
+
+func init() {
+	Analyzer.Flags.BoolVar(&flagDisableLowercase, "disable-lowercase", false,
+		"disable lowercase check")
+	Analyzer.Flags.BoolVar(&flagDisableEnglish, "disable-english", false,
+		"disable english-only check")
+	Analyzer.Flags.BoolVar(&flagDisableSpecial, "disable-special", false,
+		"disable special characters check")
+	Analyzer.Flags.BoolVar(&flagDisableSensitive, "disable-sensitive", false,
+		"disable sensitive data check")
+	Analyzer.Flags.StringVar(&flagExtraKeywords, "extra-sensitive", "",
+		"comma-separated extra sensitive keywords")
+	Analyzer.Flags.StringVar(&flagConfigFile, "config", "",
+		"path to configuration file")
+}
+
+// Config structure for future YAML support
+type Config struct {
+	DisableLowercase bool     `yaml:"disable-lowercase"`
+	DisableEnglish   bool     `yaml:"disable-english"`
+	DisableSpecial   bool     `yaml:"disable-special"`
+	DisableSensitive bool     `yaml:"disable-sensitive"`
+	ExtraKeywords    []string `yaml:"extra-sensitive"`
+}
+
+func loadConfig() {
+	data, err := os.ReadFile(".loglint.yml")
+	if err != nil {
+		return
+	}
+
+	lines := strings.Split(string(data), "\n")
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+
+		if strings.Contains(line, "disable-lowercase:") {
+			if strings.Contains(line, "true") && !flagDisableLowercase {
+				flagDisableLowercase = true
+			}
+		} else if strings.Contains(line, "disable-english:") {
+			if strings.Contains(line, "true") && !flagDisableEnglish {
+				flagDisableEnglish = true
+			}
+		} else if strings.Contains(line, "disable-special:") {
+			if strings.Contains(line, "true") && !flagDisableSpecial {
+				flagDisableSpecial = true
+			}
+		} else if strings.Contains(line, "disable-sensitive:") {
+			if strings.Contains(line, "true") && !flagDisableSensitive {
+				flagDisableSensitive = true
+			}
+		} else if strings.Contains(line, "extra-sensitive:") {
+			continue
+		} else if strings.HasPrefix(line, "-") {
+			keyword := strings.TrimSpace(strings.TrimPrefix(line, "-"))
+			keyword = strings.Trim(keyword, "\"")
+			if keyword != "" && flagExtraKeywords == "" {
+				flagExtraKeywords = keyword
+			} else if keyword != "" {
+				flagExtraKeywords += "," + keyword
+			}
+		}
+	}
+}
+
 var Analyzer = &analysis.Analyzer{
 	Name:     "loglint",
 	Doc:      "checks log messages for style and security rules",
@@ -20,6 +98,17 @@ var Analyzer = &analysis.Analyzer{
 }
 
 func run(pass *analysis.Pass) (interface{}, error) {
+	loadConfig()
+
+	var extraKeywords []string
+	if flagExtraKeywords != "" {
+		for _, kw := range strings.Split(flagExtraKeywords, ",") {
+			if trimmed := strings.TrimSpace(kw); trimmed != "" {
+				extraKeywords = append(extraKeywords, trimmed)
+			}
+		}
+	}
+
 	insp := pass.ResultOf[inspect.Analyzer].(*inspector.Inspector)
 
 	nodeFilter := []ast.Node{(*ast.CallExpr)(nil)}
@@ -30,7 +119,7 @@ func run(pass *analysis.Pass) (interface{}, error) {
 			return
 		}
 
-		if hasSensitiveConcatenation(call) {
+		if !flagDisableSensitive && hasSensitiveConcatenation(call, extraKeywords) {
 			pass.Reportf(call.Pos(),
 				"log message concatenates potentially sensitive variable")
 			return
@@ -40,7 +129,7 @@ func run(pass *analysis.Pass) (interface{}, error) {
 		if !ok {
 			return
 		}
-		checkMessage(pass, call, msg)
+		checkMessage(pass, call, msg, extraKeywords)
 	})
 	return nil, nil
 }
@@ -48,6 +137,7 @@ func run(pass *analysis.Pass) (interface{}, error) {
 var logMethods = map[string]bool{
 	"Info": true, "Error": true, "Warn": true, "Warning": true,
 	"Debug": true, "Fatal": true, "Panic": true,
+	"Print": true, "Printf": true, "Println": true,
 }
 
 var logPackages = map[string]bool{
@@ -127,6 +217,25 @@ func checkEnglish(pass *analysis.Pass, call *ast.CallExpr, msg string) {
 	}
 }
 
+func lowercaseFix(pass *analysis.Pass, lit *ast.BasicLit, msg string) analysis.Diagnostic {
+	runes := []rune(msg)
+	runes[0] = unicode.ToLower(runes[0])
+	fixed := strconv.Quote(string(runes))
+
+	return analysis.Diagnostic{
+		Pos:     lit.Pos(),
+		Message: fmt.Sprintf("log message must start with lowercase letter, got %q", msg),
+		SuggestedFixes: []analysis.SuggestedFix{{
+			Message: "convert first letter to lowercase",
+			TextEdits: []analysis.TextEdit{{
+				Pos:     lit.Pos(),
+				End:     lit.End(),
+				NewText: []byte(fixed),
+			}},
+		}},
+	}
+}
+
 func checkLowercase(pass *analysis.Pass, call *ast.CallExpr, msg string) {
 	runes := []rune(msg)
 	if len(runes) == 0 {
@@ -134,8 +243,12 @@ func checkLowercase(pass *analysis.Pass, call *ast.CallExpr, msg string) {
 	}
 
 	if unicode.IsUpper(runes[0]) {
-		pass.Reportf(call.Pos(),
-			"log message must start with lowercase letter, got %q", msg)
+		if lit, ok := call.Args[0].(*ast.BasicLit); ok {
+			pass.Report(lowercaseFix(pass, lit, msg))
+		} else {
+			pass.Reportf(call.Pos(),
+				"log message must start with lowercase letter, got %q", msg)
+		}
 	}
 }
 
@@ -163,35 +276,46 @@ func containsSensitiveKeyword(lower, keyword string) bool {
 	return true
 }
 
-func checkSensitive(pass *analysis.Pass, call *ast.CallExpr, msg string) {
+func checkSensitive(pass *analysis.Pass, call *ast.CallExpr, msg string, extraKeywords []string) {
 	lower := strings.ToLower(msg)
+
+	// Check built-in keywords
 	for _, sk := range sensitiveKeywords {
-		if containsSensitiveKeyword(lower, sk) { // ← было strings.Contains
+		if containsSensitiveKeyword(lower, sk) {
 			pass.Reportf(call.Pos(),
 				"log message may contain sensitive data (keyword %q found)", sk)
 			return
 		}
 	}
 
-	if hasSensitiveConcatenation(call) {
+	// Check extra keywords
+	for _, sk := range extraKeywords {
+		if containsSensitiveKeyword(lower, strings.ToLower(sk)) {
+			pass.Reportf(call.Pos(),
+				"log message may contain sensitive data (keyword %q found)", sk)
+			return
+		}
+	}
+
+	if hasSensitiveConcatenation(call, extraKeywords) {
 		pass.Reportf(call.Pos(),
 			"log message concatenates potentially sensitive variable")
 	}
 }
 
-func hasSensitiveConcatenation(call *ast.CallExpr) bool {
+func hasSensitiveConcatenation(call *ast.CallExpr, extraKeywords []string) bool {
 	if len(call.Args) == 0 {
 		return false
 	}
 
-	return containsSensitiveVar(call.Args[0])
+	return containsSensitiveVar(call.Args[0], extraKeywords)
 }
 
-func containsSensitiveVar(expr ast.Expr) bool {
+func containsSensitiveVar(expr ast.Expr, extraKeywords []string) bool {
 	switch e := expr.(type) {
 	case *ast.BinaryExpr:
 		if e.Op == token.ADD {
-			return containsSensitiveVar(e.X) || containsSensitiveVar(e.Y)
+			return containsSensitiveVar(e.X, extraKeywords) || containsSensitiveVar(e.Y, extraKeywords)
 		}
 	case *ast.Ident:
 		name := strings.ToLower(e.Name)
@@ -200,13 +324,26 @@ func containsSensitiveVar(expr ast.Expr) bool {
 				return true
 			}
 		}
+		for _, sk := range extraKeywords {
+			if strings.Contains(name, strings.ToLower(sk)) {
+				return true
+			}
+		}
 	}
 	return false
 }
 
-func checkMessage(pass *analysis.Pass, call *ast.CallExpr, msg string) {
-	checkLowercase(pass, call, msg)
-	checkEnglish(pass, call, msg)
-	checkSpecialChars(pass, call, msg)
-	checkSensitive(pass, call, msg)
+func checkMessage(pass *analysis.Pass, call *ast.CallExpr, msg string, extraKeywords []string) {
+	if !flagDisableLowercase {
+		checkLowercase(pass, call, msg)
+	}
+	if !flagDisableEnglish {
+		checkEnglish(pass, call, msg)
+	}
+	if !flagDisableSpecial {
+		checkSpecialChars(pass, call, msg)
+	}
+	if !flagDisableSensitive {
+		checkSensitive(pass, call, msg, extraKeywords)
+	}
 }
