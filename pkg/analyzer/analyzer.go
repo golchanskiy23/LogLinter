@@ -1,10 +1,10 @@
 package analyzer
 
 import (
-	"fmt"
 	"go/ast"
 	"go/token"
 	"strconv"
+	"unicode"
 
 	"golang.org/x/tools/go/analysis"
 	"golang.org/x/tools/go/analysis/passes/inspect"
@@ -34,17 +34,14 @@ func run(pass *analysis.Pass) (interface{}, error) {
 		}
 		checkMessage(pass, call, msg)
 	})
-	fmt.Println("Correct work")
 	return nil, nil
 }
 
-// Известные логгеры и их методы
 var logMethods = map[string]bool{
 	"Info": true, "Error": true, "Warn": true, "Warning": true,
 	"Debug": true, "Fatal": true, "Panic": true,
 }
 
-// Пакеты-логгеры (для slog, zap sugar, стандартный log)
 var logPackages = map[string]bool{
 	"log": true, "slog": true, "zap": true,
 }
@@ -65,7 +62,7 @@ func extractMessage(call *ast.CallExpr) (string, bool) {
 	if !ok || lit.Kind != token.STRING {
 		return "", false
 	}
-	// убрать кавычки: "hello" → hello
+
 	msg, err := strconv.Unquote(lit.Value)
 	if err != nil {
 		return "", false
@@ -73,10 +70,17 @@ func extractMessage(call *ast.CallExpr) (string, bool) {
 	return msg, true
 }
 
+func checkLowercase(pass *analysis.Pass, call *ast.CallExpr, msg string) {
+	runes := []rune(msg)
+	if len(runes) == 0 {
+		return
+	}
+	if unicode.IsUpper(runes[0]) {
+		pass.Reportf(call.Pos(),
+			"log message must start with lowercase letter, got %q", msg)
+	}
+}
+
 func checkMessage(pass *analysis.Pass, call *ast.CallExpr, msg string) {
-	// TODO: Реализовать проверку правил:
-	// 1. Строчная буква в начале
-	// 2. Английский язык
-	// 3. Без спецсимволов/эмодзи
-	// 4. Без чувствительных данных
+	checkLowercase(pass, call, msg)
 }
